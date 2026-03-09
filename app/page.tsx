@@ -28,9 +28,11 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Unknown error");
-      window.open(data.saveUrl, "_blank");
+      window.location.href = data.saveUrl;
     } catch (err) {
-      setGoogleError(err instanceof Error ? err.message : "Failed to create pass");
+      setGoogleError(
+        err instanceof Error ? err.message : "Failed to create pass",
+      );
     } finally {
       setGoogleLoading(false);
     }
