@@ -33,6 +33,9 @@ yarn-error.log*
 # env files (can opt-in for committing if needed)
 .env*
 
+# Copilot reference file — local only
+COPILOT.md
+
 # Google service account key files — NEVER commit these
 *.json
 !package.json
