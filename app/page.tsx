@@ -15,6 +15,17 @@ export default function Home() {
     if (!badge) return;
     setGoogleLoading(true);
     setGoogleError(null);
+
+    // Open a blank tab immediately while the user gesture is still active.
+    // On Android Chrome, window.open() must be called synchronously during a
+    // user-gesture event; doing it after an await drops the activation context
+    // and the browser blocks the popup / won't fire the Wallet app intent.
+    const walletTab = window.open(
+      "about:blank",
+      "_blank",
+      "noopener,noreferrer",
+    );
+
     try {
       const res = await fetch("/api/google-wallet", {
         method: "POST",
@@ -28,8 +39,16 @@ export default function Home() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Unknown error");
-      window.location.href = data.saveUrl;
+
+      if (walletTab) {
+        // Navigate the already-opened tab — preserves Android intent handling.
+        walletTab.location.href = data.saveUrl;
+      } else {
+        // Fallback: pop-up was blocked, navigate the current tab.
+        window.location.href = data.saveUrl;
+      }
     } catch (err) {
+      if (walletTab) walletTab.close();
       setGoogleError(
         err instanceof Error ? err.message : "Failed to create pass",
       );
