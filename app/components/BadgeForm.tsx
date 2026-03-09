@@ -22,9 +22,28 @@ export default function BadgeForm({ onSubmit }: BadgeFormProps) {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = () => {
-      const result = reader.result as string;
-      setImageUrl(result);
-      setImagePreview(result);
+      const img = new window.Image();
+      img.onload = () => {
+        const MAX = 800;
+        let { width, height } = img;
+        if (width > MAX || height > MAX) {
+          if (width > height) {
+            height = Math.round((height * MAX) / width);
+            width = MAX;
+          } else {
+            width = Math.round((width * MAX) / height);
+            height = MAX;
+          }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        canvas.getContext("2d")!.drawImage(img, 0, 0, width, height);
+        const resized = canvas.toDataURL("image/jpeg", 0.85);
+        setImageUrl(resized);
+        setImagePreview(resized);
+      };
+      img.src = reader.result as string;
     };
     reader.readAsDataURL(file);
   }

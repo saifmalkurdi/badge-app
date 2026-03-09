@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleAuth } from "google-auth-library";
+import { put } from "@vercel/blob";
 
 const ISSUER_ID = process.env.GOOGLE_WALLET_ISSUER_ID!;
 const CLASS_ID = process.env.GOOGLE_WALLET_CLASS_ID!;
@@ -27,9 +28,11 @@ function buildObjectBody(badge: {
   name: string;
   age: string;
   title: string;
+  imagePublicUrl?: string;
 }) {
   const objectId = `${ISSUER_ID}.${badge.id.replace(/-/g, "_")}`;
-  return {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const obj: Record<string, any> = {
     id: objectId,
     classId: CLASS_ID,
     genericType: "GENERIC_TYPE_UNSPECIFIED",
@@ -50,6 +53,15 @@ function buildObjectBody(badge: {
     barcode: { type: "QR_CODE", value: badge.id },
     state: "ACTIVE",
   };
+  if (badge.imagePublicUrl) {
+    obj.heroImage = {
+      sourceUri: { uri: badge.imagePublicUrl },
+      contentDescription: {
+        defaultValue: { language: "en-US", value: badge.name },
+      },
+    };
+  }
+  return obj;
 }
 
 // ---------------------------------------------------------------------------
@@ -58,11 +70,12 @@ function buildObjectBody(badge: {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { id, name, age, title } = body as {
+    const { id, name, age, title, imageUrl } = body as {
       id: string;
       name: string;
       age: string;
       title: string;
+      imageUrl?: string;
     };
 
     if (!id || !name || !age || !title) {
@@ -70,6 +83,31 @@ export async function POST(req: NextRequest) {
         { error: "Missing required badge fields" },
         { status: 400 },
       );
+    }
+
+    let imagePublicUrl: string | undefined;
+    if (
+      imageUrl?.startsWith("data:image/") &&
+      process.env.BLOB_READ_WRITE_TOKEN
+    ) {
+      try {
+        const [meta, base64] = imageUrl.split(",");
+        const mimeType = meta.split(";")[0].split(":")[1];
+        const ext = mimeType.split("/")[1] ?? "jpg";
+        const buffer = Buffer.from(base64, "base64");
+        const blob = await put(`badges/${id}.${ext}`, buffer, {
+          access: "public",
+          contentType: mimeType,
+          addRandomSuffix: false,
+        });
+        imagePublicUrl = blob.url;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      } catch (imgErr: any) {
+        console.warn(
+          "[google-wallet] image upload failed, continuing without image:",
+          imgErr?.message,
+        );
+      }
     }
 
     const credentials = {
@@ -97,11 +135,18 @@ export async function POST(req: NextRequest) {
     } catch (classErr: any) {
       const status = classErr?.response?.status ?? classErr?.status;
       if (status === 404) {
-        await authClient.request({
-          url: `${WALLET_BASE}/genericClass`,
-          method: "POST",
-          data: buildClassBody(),
-        });
+        try {
+          await authClient.request({
+            url: `${WALLET_BASE}/genericClass`,
+            method: "POST",
+            data: buildClassBody(),
+          });
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } catch (createErr: any) {
+          const createStatus = createErr?.response?.status ?? createErr?.status;
+          // 409 = class was just created by a concurrent request — that's fine
+          if (createStatus !== 409) throw createErr;
+        }
       } else {
         throw new Error(
           `Class check failed: ${status} — ${JSON.stringify(classErr?.response?.data ?? classErr?.message)}`,
@@ -110,7 +155,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 2. Create or update the pass object
-    const objectBody = buildObjectBody({ id, name, age, title });
+    const objectBody = buildObjectBody({
+      id,
+      name,
+      age,
+      title,
+      imagePublicUrl,
+    });
     const objectId = objectBody.id;
 
     try {
